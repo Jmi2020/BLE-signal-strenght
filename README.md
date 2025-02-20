@@ -7,11 +7,15 @@ A real-time Bluetooth Low Energy (BLE) device scanner that displays signal stren
 - Real-time scanning of nearby BLE devices
 - Signal strength visualization with ASCII bar graphs
 - Interactive device selection and detailed view
+- Flexible sorting options:
+  - Discovery Time: Maintains original device discovery order
+  - Signal Strength: Sorts by RSSI value (active devices only)
+- Visual grouping of devices:
+  - Separate sections for active and inactive devices
+  - Device counts for each group
+  - Clear visual separators between groups
 - Persistent device tracking (keeps inactive devices visible)
 - Automatic logging of device data to CSV file (every 30 seconds)
-- Smart device sorting:
-  - Active devices sorted by signal strength
-  - Inactive devices sorted by last seen time
 - Visual indication of device status (active/inactive)
 - Device age tracking and human-readable timestamps
 
@@ -48,7 +52,9 @@ python ble_scanner.py
 
 2. Controls:
    - Arrow keys (↑/↓) to navigate through devices
+   - Home/End to jump to first/last device
    - Enter to toggle detailed view for selected device
+   - 's' to toggle sorting mode (discovery/signal)
    - 'q' to return to list view
    - Ctrl+C to exit
 
@@ -57,6 +63,8 @@ python ble_scanner.py
    - Inactive devices shown dimmed with last seen time
    - Selected device highlighted
    - Devices remain visible for 5 minutes after last contact
+   - Groups showing total count of active and inactive devices
+   - Clear separation between active and inactive device groups
 
 4. Logging:
    - Device data is automatically logged to `ble_scan.log` in CSV format
