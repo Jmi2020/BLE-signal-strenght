@@ -22,10 +22,12 @@ class BLEScanner:
         self.scanner = None
         self.log_file = 'ble_scan.log'
         self.last_log_time = 0
-        self.log_interval = 10  # Log every 10 seconds
+        self.log_interval = 30  # Increased log interval to reduce I/O
         self.scan_count = 0
         self.selected_device_address = None  # Track device by address instead of index
         self.view_mode = 'list'  # 'list' or 'detail'
+        self.last_screen_update = 0
+        self.screen_update_interval = 0.2  # Screen refresh rate in seconds
 
     def db_to_bar(self, rssi):
         # Convert RSSI to a visual bar (stronger signals will have more bars)
@@ -107,33 +109,33 @@ class BLEScanner:
         """Log device information to CSV file"""
         current_time = time.time()
         if current_time - self.last_log_time >= self.log_interval:
+            # Perform logging in a way that minimizes I/O operations
+            log_entries = []
             utc_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
             self.scan_count += 1
             
-            # Write to log file
+            log_entries.append([f'BEGIN SCAN BLOCK {self.scan_count}', '', '', '', ''])
+            
+            # Prepare all device entries
+            for device in self.devices.values():
+                log_entries.append([
+                    '',  # Empty block column
+                    utc_time,
+                    device['name'],
+                    device['address'],
+                    device['rssi']
+                ])
+            
+            log_entries.append([f'END SCAN BLOCK {self.scan_count}', '', '', '', ''])
+            log_entries.append(['', '', '', '', ''])  # Empty line between blocks
+            
+            # Single file operation for all entries
             with open(self.log_file, 'a', newline='') as f:
                 writer = csv.writer(f)
                 # Write header if file is empty
                 if f.tell() == 0:
                     writer.writerow(['Block', 'Timestamp', 'Device Name', 'Address', 'RSSI'])
-                    writer.writerow(['BEGIN SCAN BLOCK 1', '', '', '', ''])
-                else:
-                    # Write block delimiter
-                    writer.writerow([f'BEGIN SCAN BLOCK {self.scan_count}', '', '', '', ''])
-                
-                # Write data for each device
-                for device in self.devices.values():
-                    writer.writerow([
-                        '',  # Empty block column
-                        utc_time,
-                        device['name'],
-                        device['address'],
-                        device['rssi']
-                    ])
-                
-                # Write end block delimiter
-                writer.writerow([f'END SCAN BLOCK {self.scan_count}', '', '', '', ''])
-                writer.writerow(['', '', '', '', ''])  # Empty line between blocks
+                writer.writerows(log_entries)
             
             self.last_log_time = current_time
 
@@ -141,17 +143,13 @@ class BLEScanner:
         try:
             self.scan_count = 0
             self.scanner = BleakScanner()
+            await self.scanner.start()  # Start scanner once and keep it running
             
             with self.term.fullscreen(), self.term.hidden_cursor(), self.term.cbreak():
                 while self.running:
                     try:
                         if self.check_keyboard():
                             break
-
-                        # Start scanning
-                        await self.scanner.start()
-                        await asyncio.sleep(1.0)
-                        await self.scanner.stop()
 
                         devices = self.scanner.discovered_devices
                         current_time = time.time()
@@ -169,36 +167,41 @@ class BLEScanner:
                                 'last_seen': current_time
                             }
 
-                        # Log devices
+                        # Log devices less frequently
                         self.log_devices()
 
-                        # Remove old devices
+                        # Remove old devices (increased timeout)
                         self.devices = {k: v for k, v in self.devices.items() 
-                                      if current_time - v['last_seen'] <= 10}
+                                      if current_time - v['last_seen'] <= 15}
 
-                        # Clear screen and print header
-                        print(self.term.home + self.term.clear)
-                        print(f"BLE Device Scanner - Press Ctrl+C to exit | Arrow keys to navigate | Enter to toggle details | 'q' for list view")
-                        print(f"Logging to: {self.log_file}")
-                        print("-" * self.term.width)
+                        # Update screen at controlled intervals
+                        if current_time - self.last_screen_update >= self.screen_update_interval:
+                            # Clear screen and print header
+                            print(self.term.home + self.term.clear)
+                            print(f"BLE Device Scanner - Press Ctrl+C to exit | Arrow keys to navigate | Enter to toggle details | 'q' for list view")
+                            print(f"Logging to: {self.log_file}")
+                            print("-" * self.term.width)
 
-                        # Sort devices by signal strength
-                        sorted_devices = sorted(self.devices.items(), 
-                                             key=lambda x: x[1]['rssi'], 
-                                             reverse=True)
+                            # Sort devices by signal strength
+                            sorted_devices = sorted(self.devices.items(), 
+                                                 key=lambda x: x[1]['rssi'], 
+                                                 reverse=True)
 
-                        # Set initial selection if needed
-                        if (not self.selected_device_address or 
-                            self.selected_device_address not in self.devices) and sorted_devices:
-                            self.selected_device_address = sorted_devices[0][0]
+                            # Set initial selection if needed
+                            if (not self.selected_device_address or 
+                                self.selected_device_address not in self.devices) and sorted_devices:
+                                self.selected_device_address = sorted_devices[0][0]
 
-                        if self.view_mode == 'list':
-                            self.display_list_view(sorted_devices)
-                        else:
-                            self.display_detail_view()
+                            if self.view_mode == 'list':
+                                self.display_list_view(sorted_devices)
+                            else:
+                                self.display_detail_view()
 
-                        sys.stdout.flush()
-                        await asyncio.sleep(0.1)
+                            sys.stdout.flush()
+                            self.last_screen_update = current_time
+
+                        # Shorter sleep time for more responsive controls
+                        await asyncio.sleep(0.05)
 
                     except Exception as e:
                         print(f"Error during scan: {e}")
