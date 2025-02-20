@@ -6,6 +6,7 @@ A real-time Bluetooth Low Energy (BLE) device scanner that displays signal stren
 
 - Real-time scanning of nearby BLE devices
 - Signal strength visualization with ASCII bar graphs
+- Automatic logging of device data to CSV file (every 10 seconds)
 - Two display modes:
   - Basic Mode: Compact view with device names, addresses, and signal strength
   - Detailed Mode: Comprehensive view including:
@@ -50,6 +51,15 @@ python ble_scanner.py
 2. Controls:
    - Press 'd' to toggle between basic and detailed view
    - Press Ctrl+C to exit
+
+3. Logging:
+   - Device data is automatically logged to `ble_scan.log` in CSV format
+   - Log entries include:
+     - Timestamp (UTC)
+     - Device Name
+     - MAC Address
+     - RSSI Value
+   - Log is updated every 10 seconds while the program runs
 
 ## Display Modes
 

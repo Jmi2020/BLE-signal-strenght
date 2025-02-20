@@ -7,6 +7,8 @@ import math
 import sys
 import select
 import time
+import csv
+from datetime import datetime, timezone
 
 class BLEScanner:
     def __init__(self):
@@ -18,6 +20,9 @@ class BLEScanner:
         self.display_mode = 'basic'  # 'basic' or 'detailed'
         self.running = True
         self.scanner = None
+        self.log_file = 'ble_scan.log'
+        self.last_log_time = 0
+        self.log_interval = 10  # Log every 10 seconds
 
     def db_to_bar(self, rssi):
         # Convert RSSI to a visual bar (stronger signals will have more bars)
@@ -69,6 +74,30 @@ class BLEScanner:
                 return True
         return False
 
+    def log_devices(self):
+        """Log device information to CSV file"""
+        current_time = time.time()
+        if current_time - self.last_log_time >= self.log_interval:
+            utc_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+            
+            # Write to log file
+            with open(self.log_file, 'a', newline='') as f:
+                writer = csv.writer(f)
+                # Write header if file is empty
+                if f.tell() == 0:
+                    writer.writerow(['Timestamp', 'Device Name', 'Address', 'RSSI'])
+                
+                # Write data for each device
+                for device in self.devices.values():
+                    writer.writerow([
+                        utc_time,
+                        device['name'],
+                        device['address'],
+                        device['rssi']
+                    ])
+            
+            self.last_log_time = current_time
+
     async def scan_devices(self):
         try:
             self.scanner = BleakScanner()
@@ -101,6 +130,9 @@ class BLEScanner:
                                 'last_seen': current_time
                             }
 
+                        # Log devices
+                        self.log_devices()
+
                         # Remove old devices
                         self.devices = {k: v for k, v in self.devices.items() 
                                       if current_time - v['last_seen'] <= 10}
@@ -108,6 +140,7 @@ class BLEScanner:
                         # Clear screen and print header
                         print(self.term.home + self.term.clear)
                         print(f"BLE Device Scanner - Press Ctrl+C to exit | Press 'd' to toggle detail view")
+                        print(f"Logging to: {self.log_file}")
                         print("-" * self.term.width)
 
                         # Sort devices by signal strength
