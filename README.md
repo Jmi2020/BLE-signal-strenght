@@ -54,12 +54,17 @@ python ble_scanner.py
 
 3. Logging:
    - Device data is automatically logged to `ble_scan.log` in CSV format
-   - Log entries include:
-     - Timestamp (UTC)
-     - Device Name
-     - MAC Address
-     - RSSI Value
-   - Log is updated every 10 seconds while the program runs
+   - Log entries are organized in scan blocks, with each block representing a 10-second scan
+   - Each block includes:
+     - Block start delimiter (BEGIN SCAN BLOCK #)
+     - Device entries with:
+       - Timestamp (UTC)
+       - Device Name
+       - MAC Address
+       - RSSI Value
+     - Block end delimiter (END SCAN BLOCK #)
+     - Empty line between blocks
+   - New blocks are added every 10 seconds while the program runs
 
 ## Display Modes
 

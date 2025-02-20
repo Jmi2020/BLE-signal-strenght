@@ -23,6 +23,7 @@ class BLEScanner:
         self.log_file = 'ble_scan.log'
         self.last_log_time = 0
         self.log_interval = 10  # Log every 10 seconds
+        self.scan_count = 0
 
     def db_to_bar(self, rssi):
         # Convert RSSI to a visual bar (stronger signals will have more bars)
@@ -79,27 +80,40 @@ class BLEScanner:
         current_time = time.time()
         if current_time - self.last_log_time >= self.log_interval:
             utc_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+            self.scan_count += 1
             
             # Write to log file
             with open(self.log_file, 'a', newline='') as f:
                 writer = csv.writer(f)
                 # Write header if file is empty
                 if f.tell() == 0:
-                    writer.writerow(['Timestamp', 'Device Name', 'Address', 'RSSI'])
+                    writer.writerow(['Block', 'Timestamp', 'Device Name', 'Address', 'RSSI'])
+                    writer.writerow(['BEGIN SCAN BLOCK 1', '', '', '', ''])
+                else:
+                    # Write block delimiter
+                    writer.writerow([f'BEGIN SCAN BLOCK {self.scan_count}', '', '', '', ''])
                 
                 # Write data for each device
                 for device in self.devices.values():
                     writer.writerow([
+                        '',  # Empty block column
                         utc_time,
                         device['name'],
                         device['address'],
                         device['rssi']
                     ])
+                
+                # Write end block delimiter
+                writer.writerow([f'END SCAN BLOCK {self.scan_count}', '', '', '', ''])
+                writer.writerow(['', '', '', '', ''])  # Empty line between blocks
             
             self.last_log_time = current_time
 
     async def scan_devices(self):
         try:
+            # Reset scan count at start
+            self.scan_count = 0
+            
             self.scanner = BleakScanner()
             with self.term.fullscreen(), self.term.hidden_cursor(), self.term.cbreak():
                 while self.running:
