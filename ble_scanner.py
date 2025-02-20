@@ -28,6 +28,8 @@ class BLEScanner:
         self.view_mode = 'list'  # 'list' or 'detail'
         self.last_screen_update = 0
         self.screen_update_interval = 0.2  # Screen refresh rate in seconds
+        self.device_timeout = 300  # Keep devices for 5 minutes instead of removing them
+        self.inactive_threshold = 15  # Consider device inactive after 15 seconds
 
     def db_to_bar(self, rssi):
         # Convert RSSI to a visual bar (stronger signals will have more bars)
@@ -139,6 +141,16 @@ class BLEScanner:
             
             self.last_log_time = current_time
 
+    def get_device_age(self, last_seen):
+        """Convert last seen timestamp to human readable format"""
+        age = time.time() - last_seen
+        if age < 60:
+            return f"{int(age)}s"
+        elif age < 3600:
+            return f"{int(age/60)}m"
+        else:
+            return f"{int(age/3600)}h"
+
     async def scan_devices(self):
         try:
             self.scan_count = 0
@@ -170,9 +182,9 @@ class BLEScanner:
                         # Log devices less frequently
                         self.log_devices()
 
-                        # Remove old devices (increased timeout)
+                        # Remove very old devices
                         self.devices = {k: v for k, v in self.devices.items() 
-                                      if current_time - v['last_seen'] <= 15}
+                                      if current_time - v['last_seen'] <= self.device_timeout}
 
                         # Update screen at controlled intervals
                         if current_time - self.last_screen_update >= self.screen_update_interval:
@@ -182,10 +194,24 @@ class BLEScanner:
                             print(f"Logging to: {self.log_file}")
                             print("-" * self.term.width)
 
-                            # Sort devices by signal strength
-                            sorted_devices = sorted(self.devices.items(), 
-                                                 key=lambda x: x[1]['rssi'], 
-                                                 reverse=True)
+                            # Sort devices: active ones by signal strength, inactive ones by last seen
+                            current_time = time.time()
+                            active_devices = []
+                            inactive_devices = []
+                            
+                            for addr, device in self.devices.items():
+                                device_age = current_time - device['last_seen']
+                                if device_age <= self.inactive_threshold:
+                                    active_devices.append((addr, device))
+                                else:
+                                    inactive_devices.append((addr, device))
+                            
+                            # Sort active devices by signal strength
+                            active_devices.sort(key=lambda x: x[1]['rssi'], reverse=True)
+                            # Sort inactive devices by last seen time (most recent first)
+                            inactive_devices.sort(key=lambda x: x[1]['last_seen'], reverse=True)
+                            
+                            sorted_devices = active_devices + inactive_devices
 
                             # Set initial selection if needed
                             if (not self.selected_device_address or 
@@ -193,9 +219,9 @@ class BLEScanner:
                                 self.selected_device_address = sorted_devices[0][0]
 
                             if self.view_mode == 'list':
-                                self.display_list_view(sorted_devices)
+                                self.display_list_view(sorted_devices, current_time)
                             else:
-                                self.display_detail_view()
+                                self.display_detail_view(current_time)
 
                             sys.stdout.flush()
                             self.last_screen_update = current_time
@@ -215,32 +241,49 @@ class BLEScanner:
                 await self.scanner.stop()
             print("\nScanning stopped by user")
 
-    def display_list_view(self, sorted_devices):
-        print(f"{'Device Name':<{self.max_name_length}} | {'Address':<{self.max_addr_length}} | {'Signal':<{self.bar_length}} | RSSI")
+    def display_list_view(self, sorted_devices, current_time):
+        print(f"{'Device Name':<{self.max_name_length}} | {'Address':<{self.max_addr_length}} | {'Signal':<{self.bar_length}} | {'Status'}")
         print("-" * self.term.width)
         
         for addr, device in sorted_devices:
             name = device['name'][:self.max_name_length]
             name = f"{name:<{self.max_name_length}}"
             address = f"{device['address']:<{self.max_addr_length}}"
-            bar = self.db_to_bar(device['rssi'])
-            rssi = device['rssi']
+            device_age = current_time - device['last_seen']
             
-            if addr == self.selected_device_address:
-                print(self.term.reverse(
-                    f"{name} | {address} | {bar} | {rssi} dBm"
-                ))
+            if device_age <= self.inactive_threshold:
+                # Active device
+                bar = self.db_to_bar(device['rssi'])
+                status = f"{device['rssi']} dBm"
             else:
-                print(f"{name} | {address} | {bar} | {rssi} dBm")
+                # Inactive device
+                bar = "." * self.bar_length
+                status = f"Last seen {self.get_device_age(device['last_seen'])} ago"
+            
+            line = f"{name} | {address} | {bar} | {status}"
+            if addr == self.selected_device_address:
+                print(self.term.reverse(line))
+            else:
+                if device_age > self.inactive_threshold:
+                    print(self.term.dim(line))
+                else:
+                    print(line)
 
-    def display_detail_view(self):
+    def display_detail_view(self, current_time):
         if self.selected_device_address in self.devices:
             device = self.devices[self.selected_device_address]
+            device_age = current_time - device['last_seen']
+            
             print(f"\nDetailed View for Selected Device:")
             print("-" * self.term.width)
             print(f"Device Name: {device['name']}")
             print(f"Address: {device['address']}")
-            print(f"Signal Strength: {self.db_to_bar(device['rssi'])} ({device['rssi']} dBm)")
+            
+            if device_age <= self.inactive_threshold:
+                print(f"Signal Strength: {self.db_to_bar(device['rssi'])} ({device['rssi']} dBm)")
+            else:
+                print(f"Signal Strength: No current signal (Last seen {self.get_device_age(device['last_seen'])} ago)")
+            
             print(f"Device Type: {device['appearance']}")
             print(f"Services: {device['services']}")
             print(f"Manufacturer: {device['manufacturer']}")
