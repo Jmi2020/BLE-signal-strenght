@@ -29,6 +29,7 @@ A real-time Bluetooth Low Energy (BLE) device scanner that displays signal stren
 ## Installation
 
 1. Create a virtual environment (recommended):
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate  # On Unix/macOS
@@ -37,6 +38,7 @@ source .venv/bin/activate  # On Unix/macOS
 ```
 
 2. Install required packages:
+
 ```bash
 pip install -r requirements.txt
 ```
@@ -44,6 +46,7 @@ pip install -r requirements.txt
 ## Usage
 
 1. Run the scanner:
+
 ```bash
 python ble_scanner.py
 ```
@@ -69,14 +72,18 @@ python ble_scanner.py
 ## Display Modes
 
 ### Basic Mode
+
 Shows a compact list of devices with:
+
 - Device Name
 - MAC Address
 - Signal Strength Bar
 - RSSI Value (in dBm)
 
 ### Detailed Mode
+
 Shows comprehensive information for each device:
+
 - Device Name
 - MAC Address
 - Signal Strength (with visual bar and dBm value)
@@ -102,9 +109,11 @@ Shows comprehensive information for each device:
 2. **Permission Issues**
    - macOS: Accept Bluetooth permission requests when prompted
    - Linux: Run with sudo or add user to the bluetooth group:
+
      ```bash
      sudo usermod -a -G bluetooth $USER
      ```
+
    - Windows: Run as administrator if needed
 
 3. **No Devices Found**
