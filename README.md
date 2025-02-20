@@ -6,19 +6,14 @@ A real-time Bluetooth Low Energy (BLE) device scanner that displays signal stren
 
 - Real-time scanning of nearby BLE devices
 - Signal strength visualization with ASCII bar graphs
-- Automatic logging of device data to CSV file (every 10 seconds)
-- Two display modes:
-  - Basic Mode: Compact view with device names, addresses, and signal strength
-  - Detailed Mode: Comprehensive view including:
-    - Device Name
-    - MAC Address
-    - Signal Strength (RSSI)
-    - Device Type/Appearance
-    - Advertised Services
-    - Manufacturer Data
-- Auto-refresh of device list
-- Removal of inactive devices after 10 seconds
-- Terminal-based UI with keyboard controls
+- Interactive device selection and detailed view
+- Persistent device tracking (keeps inactive devices visible)
+- Automatic logging of device data to CSV file (every 30 seconds)
+- Smart device sorting:
+  - Active devices sorted by signal strength
+  - Inactive devices sorted by last seen time
+- Visual indication of device status (active/inactive)
+- Device age tracking and human-readable timestamps
 
 ## Requirements
 
@@ -52,12 +47,20 @@ python ble_scanner.py
 ```
 
 2. Controls:
-   - Press 'd' to toggle between basic and detailed view
-   - Press Ctrl+C to exit
+   - Arrow keys (↑/↓) to navigate through devices
+   - Enter to toggle detailed view for selected device
+   - 'q' to return to list view
+   - Ctrl+C to exit
 
-3. Logging:
+3. Display Features:
+   - Active devices shown with signal strength bars
+   - Inactive devices shown dimmed with last seen time
+   - Selected device highlighted
+   - Devices remain visible for 5 minutes after last contact
+
+4. Logging:
    - Device data is automatically logged to `ble_scan.log` in CSV format
-   - Log entries are organized in scan blocks, with each block representing a 10-second scan
+   - Log entries are organized in scan blocks
    - Each block includes:
      - Block start delimiter (BEGIN SCAN BLOCK #)
      - Device entries with:
@@ -67,26 +70,30 @@ python ble_scanner.py
        - RSSI Value
      - Block end delimiter (END SCAN BLOCK #)
      - Empty line between blocks
-   - New blocks are added every 10 seconds while the program runs
+   - New blocks are added every 30 seconds while the program runs
 
 ## Display Modes
 
-### Basic Mode
+### List View
 
-Shows a compact list of devices with:
-
-- Device Name
-- MAC Address
-- Signal Strength Bar
-- RSSI Value (in dBm)
-
-### Detailed Mode
-
-Shows comprehensive information for each device:
+Shows an interactive list of all devices with:
 
 - Device Name
 - MAC Address
-- Signal Strength (with visual bar and dBm value)
+- Signal Strength Bar (for active devices)
+- Status:
+  - Active devices: Current RSSI value in dBm
+  - Inactive devices: Time since last seen
+
+### Detail View
+
+Shows comprehensive information for the selected device:
+
+- Device Name
+- MAC Address
+- Signal Strength:
+  - Active devices: Visual bar and dBm value
+  - Inactive devices: Last seen timestamp
 - Device Type
 - Available Services
 - Manufacturer Data
@@ -94,7 +101,8 @@ Shows comprehensive information for each device:
 ## Technical Notes
 
 - Signal strength (RSSI) typically ranges from -30 dBm (strong) to -100 dBm (weak)
-- Devices that haven't been seen for 10 seconds are automatically removed from the display
+- Devices are considered inactive after 15 seconds without signal
+- Devices are retained in the list for 5 minutes after last contact
 - The scanner requires appropriate permissions to access the Bluetooth adapter
 - On macOS, you need to grant Bluetooth permissions when prompted
 - On Linux systems, you might need to run with sudo or add appropriate permissions
