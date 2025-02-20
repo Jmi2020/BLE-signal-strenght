@@ -24,6 +24,8 @@ class BLEScanner:
         self.last_log_time = 0
         self.log_interval = 10  # Log every 10 seconds
         self.scan_count = 0
+        self.selected_device_address = None  # Track device by address instead of index
+        self.view_mode = 'list'  # 'list' or 'detail'
 
     def db_to_bar(self, rssi):
         # Convert RSSI to a visual bar (stronger signals will have more bars)
@@ -65,11 +67,37 @@ class BLEScanner:
         return f'ID: {mfg_id:04x}, Data: {data.hex()[:20]}'
 
     def check_keyboard(self):
-        # Non-blocking keyboard input check
         if select.select([sys.stdin], [], [], 0)[0]:
             key = sys.stdin.read(1)
-            if key == 'd':
-                self.display_mode = 'detailed' if self.display_mode == 'basic' else 'basic'
+            if key == '\x1b':  # Arrow key prefix
+                next_two = sys.stdin.read(2)
+                sorted_devices = sorted(self.devices.items(), 
+                                     key=lambda x: x[1]['rssi'], 
+                                     reverse=True)
+                
+                # Find current index based on selected address
+                current_index = 0
+                if self.selected_device_address:
+                    for idx, (addr, _) in enumerate(sorted_devices):
+                        if addr == self.selected_device_address:
+                            current_index = idx
+                            break
+                
+                if next_two == '[A':  # Up arrow
+                    new_index = max(0, current_index - 1)
+                    if sorted_devices:
+                        self.selected_device_address = sorted_devices[new_index][0]
+                elif next_two == '[B':  # Down arrow
+                    new_index = min(len(sorted_devices) - 1, current_index + 1)
+                    if sorted_devices:
+                        self.selected_device_address = sorted_devices[new_index][0]
+            
+            elif key in ['\r', '\n']:  # Enter key (handle both CR and LF)
+                if self.selected_device_address and self.selected_device_address in self.devices:
+                    self.view_mode = 'detail' if self.view_mode == 'list' else 'list'
+            
+            elif key == 'q':  # Back to list view
+                self.view_mode = 'list'
             elif key == '\x03':  # Ctrl+C
                 self.running = False
                 return True
@@ -111,14 +139,12 @@ class BLEScanner:
 
     async def scan_devices(self):
         try:
-            # Reset scan count at start
             self.scan_count = 0
-            
             self.scanner = BleakScanner()
+            
             with self.term.fullscreen(), self.term.hidden_cursor(), self.term.cbreak():
                 while self.running:
                     try:
-                        # Check for keyboard input
                         if self.check_keyboard():
                             break
 
@@ -126,12 +152,11 @@ class BLEScanner:
                         await self.scanner.start()
                         await asyncio.sleep(1.0)
                         await self.scanner.stop()
-                        
-                        # Get discovered devices
+
                         devices = self.scanner.discovered_devices
+                        current_time = time.time()
                         
                         # Update devices dictionary
-                        current_time = time.time()
                         for device in devices:
                             self.devices[device.address] = {
                                 'name': device.name or 'Unknown',
@@ -153,7 +178,7 @@ class BLEScanner:
 
                         # Clear screen and print header
                         print(self.term.home + self.term.clear)
-                        print(f"BLE Device Scanner - Press Ctrl+C to exit | Press 'd' to toggle detail view")
+                        print(f"BLE Device Scanner - Press Ctrl+C to exit | Arrow keys to navigate | Enter to toggle details | 'q' for list view")
                         print(f"Logging to: {self.log_file}")
                         print("-" * self.term.width)
 
@@ -162,31 +187,19 @@ class BLEScanner:
                                              key=lambda x: x[1]['rssi'], 
                                              reverse=True)
 
-                        if self.display_mode == 'basic':
-                            # Basic view
-                            print(f"{'Device Name':<{self.max_name_length}} | {'Address':<{self.max_addr_length}} | {'Signal':<{self.bar_length}} | RSSI")
-                            print("-" * self.term.width)
-                            for addr, device in sorted_devices:
-                                name = device['name'][:self.max_name_length]
-                                name = f"{name:<{self.max_name_length}}"
-                                address = f"{device['address']:<{self.max_addr_length}}"
-                                bar = self.db_to_bar(device['rssi'])
-                                rssi = device['rssi']
-                                print(f"{name} | {address} | {bar} | {rssi} dBm")
+                        # Set initial selection if needed
+                        if (not self.selected_device_address or 
+                            self.selected_device_address not in self.devices) and sorted_devices:
+                            self.selected_device_address = sorted_devices[0][0]
+
+                        if self.view_mode == 'list':
+                            self.display_list_view(sorted_devices)
                         else:
-                            # Detailed view
-                            for addr, device in sorted_devices:
-                                print(f"\nDevice: {device['name']}")
-                                print(f"Address: {device['address']}")
-                                print(f"Signal: {self.db_to_bar(device['rssi'])} ({device['rssi']} dBm)")
-                                print(f"Type: {device['appearance']}")
-                                print(f"Services: {device['services']}")
-                                print(f"Manufacturer: {device['manufacturer']}")
-                                print("-" * self.term.width)
+                            self.display_detail_view()
 
                         sys.stdout.flush()
                         await asyncio.sleep(0.1)
-                    
+
                     except Exception as e:
                         print(f"Error during scan: {e}")
                         await asyncio.sleep(1)
@@ -198,6 +211,37 @@ class BLEScanner:
             if self.scanner:
                 await self.scanner.stop()
             print("\nScanning stopped by user")
+
+    def display_list_view(self, sorted_devices):
+        print(f"{'Device Name':<{self.max_name_length}} | {'Address':<{self.max_addr_length}} | {'Signal':<{self.bar_length}} | RSSI")
+        print("-" * self.term.width)
+        
+        for addr, device in sorted_devices:
+            name = device['name'][:self.max_name_length]
+            name = f"{name:<{self.max_name_length}}"
+            address = f"{device['address']:<{self.max_addr_length}}"
+            bar = self.db_to_bar(device['rssi'])
+            rssi = device['rssi']
+            
+            if addr == self.selected_device_address:
+                print(self.term.reverse(
+                    f"{name} | {address} | {bar} | {rssi} dBm"
+                ))
+            else:
+                print(f"{name} | {address} | {bar} | {rssi} dBm")
+
+    def display_detail_view(self):
+        if self.selected_device_address in self.devices:
+            device = self.devices[self.selected_device_address]
+            print(f"\nDetailed View for Selected Device:")
+            print("-" * self.term.width)
+            print(f"Device Name: {device['name']}")
+            print(f"Address: {device['address']}")
+            print(f"Signal Strength: {self.db_to_bar(device['rssi'])} ({device['rssi']} dBm)")
+            print(f"Device Type: {device['appearance']}")
+            print(f"Services: {device['services']}")
+            print(f"Manufacturer: {device['manufacturer']}")
+            print(f"\nPress 'q' to return to list view")
 
 async def main():
     scanner = BLEScanner()
