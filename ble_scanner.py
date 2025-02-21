@@ -32,6 +32,10 @@ class BLEScanner:
         self.inactive_threshold = 15  # Consider device inactive after 15 seconds
         self.discovery_times = {}  # Track when devices are first discovered
         self.sort_mode = 'discovery'  # 'discovery' or 'signal'
+        self.status_width = 30  # Width for the status column
+        self.header_height = 5  # Height of the fixed header (title + info + column headers + separator)
+        self.scroll_offset = 0  # Track scrolling position
+        self.visible_lines = 0  # Track number of visible lines
 
     def db_to_bar(self, rssi):
         # Convert RSSI to a visual bar (stronger signals will have more bars)
@@ -100,30 +104,45 @@ class BLEScanner:
                 active_devices, inactive_devices = self.sort_devices(self.devices, current_time)
                 sorted_devices = active_devices + inactive_devices
                 
-                # Find current index based on selected address
-                current_index = 0
-                if self.selected_device_address:
-                    for idx, (addr, _) in enumerate(sorted_devices):
-                        if addr == self.selected_device_address:
-                            current_index = idx
-                            break
+                # Calculate content height
+                content_height = self.term.height - self.header_height
                 
                 if next_two == '[A':  # Up arrow
-                    new_index = max(0, current_index - 1)
-                    if sorted_devices:
+                    if self.selected_device_address:
+                        current_index = next((i for i, (addr, _) in enumerate(sorted_devices) 
+                                           if addr == self.selected_device_address), 0)
+                        new_index = max(0, current_index - 1)
                         self.selected_device_address = sorted_devices[new_index][0]
+                        
+                        # Adjust scroll if selection would be off screen
+                        if new_index < self.scroll_offset:
+                            self.scroll_offset = new_index
+                
                 elif next_two == '[B':  # Down arrow
-                    new_index = min(len(sorted_devices) - 1, current_index + 1)
                     if sorted_devices:
+                        current_index = next((i for i, (addr, _) in enumerate(sorted_devices) 
+                                           if addr == self.selected_device_address), 0)
+                        new_index = min(len(sorted_devices) - 1, current_index + 1)
                         self.selected_device_address = sorted_devices[new_index][0]
-                elif next_two == '[5':  # Page Up (usually with Home key)
+                        
+                        # Adjust scroll if selection would be off screen
+                        if new_index >= self.scroll_offset + content_height:
+                            self.scroll_offset = max(0, new_index - content_height + 1)
+                
+                elif next_two == '[5':  # Page Up
                     sys.stdin.read(1)  # Consume trailing ~
+                    self.scroll_offset = max(0, self.scroll_offset - content_height)
                     if sorted_devices:
-                        self.selected_device_address = sorted_devices[0][0]
-                elif next_two == '[6':  # Page Down (usually with End key)
+                        visible_start = self.scroll_offset
+                        self.selected_device_address = sorted_devices[visible_start][0]
+                
+                elif next_two == '[6':  # Page Down
                     sys.stdin.read(1)  # Consume trailing ~
+                    max_scroll = max(0, len(sorted_devices) - content_height)
+                    self.scroll_offset = min(max_scroll, self.scroll_offset + content_height)
                     if sorted_devices:
-                        self.selected_device_address = sorted_devices[-1][0]
+                        visible_start = min(self.scroll_offset, len(sorted_devices) - 1)
+                        self.selected_device_address = sorted_devices[visible_start][0]
             
             elif key in ['\r', '\n']:  # Enter key
                 if self.selected_device_address and self.selected_device_address in self.devices:
@@ -185,7 +204,8 @@ class BLEScanner:
         try:
             self.scan_count = 0
             self.scanner = BleakScanner()
-            await self.scanner.start()  # Start scanner once and keep it running
+            await self.scanner.start()
+            self.scroll_offset = 0  # Initialize scroll position
             
             with self.term.fullscreen(), self.term.hidden_cursor(), self.term.cbreak():
                 while self.running:
@@ -196,9 +216,8 @@ class BLEScanner:
                         devices = self.scanner.discovered_devices
                         current_time = time.time()
                         
-                        # Update devices dictionary
+                        # Update devices dictionary without affecting scroll position
                         for device in devices:
-                            # Record discovery time for new devices
                             if device.address not in self.discovery_times:
                                 self.discovery_times[device.address] = current_time
                             
@@ -217,40 +236,33 @@ class BLEScanner:
                         # Log devices less frequently
                         self.log_devices()
 
-                        # Remove very old devices and their discovery times
+                        # Remove very old devices while preserving scroll position
                         current_devices = {k: v for k, v in self.devices.items() 
                                         if current_time - v['last_seen'] <= self.device_timeout}
-                        # Clean up discovery times for removed devices
+                        removed_count = len(self.devices) - len(current_devices)
+                        if removed_count > 0:
+                            # Adjust scroll offset if devices were removed above current position
+                            self.scroll_offset = max(0, self.scroll_offset - removed_count)
+                        
                         self.discovery_times = {k: v for k, v in self.discovery_times.items()
                                               if k in current_devices}
                         self.devices = current_devices
 
+                        # Sort devices for display
+                        active_devices, inactive_devices = self.sort_devices(self.devices, current_time)
+                        sorted_devices = active_devices + inactive_devices
+
                         # Update screen at controlled intervals
                         if current_time - self.last_screen_update >= self.screen_update_interval:
-                            # Clear screen and print header
-                            print(self.term.home + self.term.clear)
-                            print(f"BLE Device Scanner - Press Ctrl+C to exit | ↑/↓ navigate | Home/End first/last | Enter toggle details | 's' sort ({self.sort_mode})")
-                            print(f"Logging to: {self.log_file}")
-                            print("-" * self.term.width)
-
-                            # Sort and group devices
-                            active_devices, inactive_devices = self.sort_devices(self.devices, current_time)
-                            sorted_devices = active_devices + inactive_devices
-
-                            # Set initial selection if needed
-                            if (not self.selected_device_address or 
-                                self.selected_device_address not in self.devices) and sorted_devices:
-                                self.selected_device_address = sorted_devices[0][0]
-
                             if self.view_mode == 'list':
                                 self.display_list_view(sorted_devices, current_time)
                             else:
+                                print(self.term.home + self.term.clear)
                                 self.display_detail_view(current_time)
 
                             sys.stdout.flush()
                             self.last_screen_update = current_time
 
-                        # Shorter sleep time for more responsive controls
                         await asyncio.sleep(0.05)
 
                     except Exception as e:
@@ -263,6 +275,9 @@ class BLEScanner:
         finally:
             if self.scanner:
                 await self.scanner.stop()
+            print(self.term.exit_fullscreen())
+            print(self.term.normal_cursor())
+            print(self.term.change_scroll_region(0, self.term.height))
             print("\nScanning stopped by user")
 
     def display_list_view(self, sorted_devices, current_time):
@@ -270,43 +285,75 @@ class BLEScanner:
         total_active = len(active_devices)
         total_inactive = len(inactive_devices)
         
-        print(f"{'Device Name':<{self.max_name_length}} | {'Address':<{self.max_addr_length}} | {'Signal':<{self.bar_length}} | {'Status'}")
-        print("-" * self.term.width)
+        # Calculate available display space
+        content_height = self.term.height - self.header_height
         
-        # Display active devices with count
+        # Clear screen
+        print(self.term.home + self.term.clear)
+        
+        # Fixed header section (always visible)
+        with self.term.location(0, 0):
+            print(self.term.clear_eos + f"BLE Device Scanner - Press Ctrl+C to exit | ↑/↓ navigate | PgUp/PgDn scroll | Home/End first/last | Enter toggle details | 's' sort ({self.sort_mode})")
+            print(f"Logging to: {self.log_file}")
+            print("-" * self.term.width)
+            
+            address_header = "ADDRESS" + " " * 11
+            print(f"{'Device Name':<{self.max_name_length}} | {address_header:<{self.max_addr_length}} | {'Signal':<{self.bar_length}} | {'Status':<{self.status_width}}")
+            print("-" * self.term.width)
+
+        # Set up scrolling region below the header
+        print(self.term.hide_cursor())
+        print(self.term.change_scroll_region(self.header_height, self.term.height))
+        print(self.term.move(self.header_height, 0))
+        
+        # Prepare all lines that will be displayed
+        display_lines = []
+        
         if active_devices:
-            print(f"\nActive Devices ({total_active}):")
+            display_lines.append(f"\nActive Devices ({total_active}):")
             for addr, device in active_devices:
                 name = device['name'][:self.max_name_length]
                 name = f"{name:<{self.max_name_length}}"
                 address = f"{device['address']:<{self.max_addr_length}}"
                 bar = self.db_to_bar(device['rssi'])
                 status = f"{device['rssi']} dBm"
+                status = f"{status:<{self.status_width}}"
                 
                 line = f"{name} | {address} | {bar} | {status}"
                 if addr == self.selected_device_address:
-                    print(self.term.reverse(line))
-                else:
-                    print(line)
+                    line = self.term.reverse(line)
+                display_lines.append(line)
         
-        # Display inactive devices with separator and count
         if inactive_devices:
-            print(f"\nInactive Devices ({total_inactive}):")
+            display_lines.append(f"\nInactive Devices ({total_inactive}):")
             for addr, device in inactive_devices:
                 name = device['name'][:self.max_name_length]
                 name = f"{name:<{self.max_name_length}}"
                 address = f"{device['address']:<{self.max_addr_length}}"
                 bar = "." * self.bar_length
                 status = f"Last seen {self.get_device_age(device['last_seen'])} ago"
+                status = f"{status:<{self.status_width}}"
                 
                 line = f"{name} | {address} | {bar} | {status}"
                 if addr == self.selected_device_address:
-                    print(self.term.reverse(line))
+                    line = self.term.reverse(line)
                 else:
-                    print(self.term.dim(line))
+                    line = self.term.dim(line)
+                display_lines.append(line)
         
-        if not sorted_devices:
-            print("\nNo devices found")
+        if not display_lines:
+            display_lines.append("\nNo devices found")
+
+        # Calculate valid scroll range
+        max_scroll = max(0, len(display_lines) - content_height)
+        self.scroll_offset = max(0, min(self.scroll_offset, max_scroll))
+        
+        # Display visible portion of the list
+        visible_lines = display_lines[self.scroll_offset:self.scroll_offset + content_height]
+        print("\n".join(visible_lines))
+        
+        # Reset scroll region
+        print(self.term.change_scroll_region(0, self.term.height))
 
     def display_detail_view(self, current_time):
         if self.selected_device_address in self.devices:
